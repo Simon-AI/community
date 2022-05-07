@@ -5,17 +5,21 @@ import com.question.community.entity.User;
 import com.question.community.service.UserService;
 import com.question.community.util.CommunityConstant;
 import com.question.community.util.MailClient;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.CookieValue;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 
 import javax.imageio.ImageIO;
 import javax.servlet.ServletOutputStream;
+import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import java.awt.*;
@@ -33,6 +37,10 @@ public class LoginController implements CommunityConstant {
 
     @Autowired
     private Producer kaptchaProducer;
+
+    @Value("${server.servlet.context-path}")
+    private String contextPath;
+
 
     @RequestMapping(path = "/register" , method = RequestMethod.GET)
     public String getRegisterPage(){
@@ -99,6 +107,65 @@ public class LoginController implements CommunityConstant {
         }
 
 
+    }
+
+    @RequestMapping(path = "/login", method = RequestMethod.POST)
+    public String login(String username, String password, String code, Boolean rememberme,
+                        Model model, HttpSession session, HttpServletResponse response){
+        //检查验证码
+        String kaptcha = (String) session.getAttribute("kaptcha");
+        if(StringUtils.isBlank(kaptcha)||StringUtils.isBlank(code)||!kaptcha.equalsIgnoreCase(code)){
+            model.addAttribute("codeMsg","验证码不正确！");
+            return "/site/login";
+        }
+
+        //检查账号，密码
+        int expiredSeconds = rememberme!=null ? REMEMBER_EXPIRED_SECONDS : DEFAULT_EXPIRED_SECONDS;
+        Map<String, Object> map = userService.login(username, password, expiredSeconds);
+        if(map.containsKey("ticket")){
+            Cookie cookie = new Cookie("ticket",map.get("ticket").toString());
+            cookie.setPath(contextPath);
+            cookie.setMaxAge(expiredSeconds);
+            response.addCookie(cookie);
+            return "redirect:/index";
+        }
+        else{
+            model.addAttribute("usernameMsg",map.get("usernameMsg"));
+            model.addAttribute("passwordMsg",map.get("passwordMsg"));
+            return "/site/login";
+        }
+
+
+    }
+
+    @RequestMapping(path = "/logout", method = RequestMethod.GET)
+    public String logout(@CookieValue("ticket") String ticket){
+        userService.logout(ticket);
+        return "redirect:/login";
+    }
+
+    @RequestMapping(path = "/forget", method = RequestMethod.GET)
+    public String getForgetPage(){
+        return "/site/forget";
+    }
+
+    @RequestMapping(path = "/forget/code", method = RequestMethod.GET)
+    public String forgetPassword(String email,HttpSession session){
+        Map<String,Object> map = userService.sendForgetEmail(email);
+        String code = (String) map.get("code");
+        session.setAttribute("code",code);
+        return "/site/forget";
+    }
+
+    @RequestMapping(path = "/forget", method = RequestMethod.POST)
+    public String forgetPassword(@Value("email") String email,@Value("code") String code,String password,HttpSession session){
+        if(session.getAttribute("code").equals(code)){
+            System.out.println("forget password success!");
+            return "/site/login";
+        }
+        else{
+            return "/site/forget";
+        }
     }
 
 
